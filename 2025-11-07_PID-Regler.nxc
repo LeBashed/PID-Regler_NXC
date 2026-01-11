@@ -1,0 +1,174 @@
+/*  Program: PID-Regler
+    Erstellt von Leonard Misfeldt
+    Letzte Aktualiesierung 2025-11-26
+    Version: 5.2.3
+    
+    V.1.3.3  Dieses Programm dient dazu das NXC-Roboter mithilfe des 2 Punkt Reglersystems eine Straße entlang fahren kann.
+             Dabei erkennt das Programm ob er bei einer Schwarzen linien die an den äußeren Ränden einer Straße sich befinden, nach Links
+             oder nach Rechts ausweichen soll. Desweiteren befindet sich in diesem Programm ein Subprogamm, welches vor jedem Start ausgeführt wird, dieses sorgt dafür das
+             die Lichtsensoren sich selber kalibrieren, um Lichtverhältnisse besser zu umgehen. Zusätzlich wird mithilfe dem subprogrammm Void display, sichergestellt,
+             das alle wichtigen Werte ständig ausgegeben werden, auf dem Display.
+    
+    V.2.1.1  Zusätzlich befindet sich ein Code für den Ultraschallsensor, der dafür sorgt, das er vor einem Hindernis anhält.
+    V.2.3.4  Der der Void der dafür sorgt, dass der Roboter fährt muss in den Void für das Anhalten verlegt werden.
+    V.2.2.1  Der Code zum Anhalten wurde erfolgreich implementiert.
+    V.3.1.1  Um den Speed Ändern zu können, muss sicher gestellt werden, dass das Define für zu einer Variable geändert wird.
+    V.4.1.1  Der Code für die Zufallsgeschwindigkeit wurde Entfernt, da dieser bei dem Code für das P-Reglersystem nur stören würde.
+    v.4.1.2  Auch der Code zum Anhalten ist Überflüssig, zudem wurden schon die benötigten Variablen für den P-Regler Festgelegt.
+    v.4.2.1  Der P-Regler wurde erfolgreich implementiert, und kann nun den Abstand zum vordermann einhalten.
+    v.4.2.2  Optimalerweise wurde für Kp ein Wert von 2.0 gewählt.
+    v.5.1.1  Die Task P-Regler wurde in PID-Regler umbenannt.
+    v.5.2.1  Der Code für den PID-Regler wurde Implementiert.
+    v.5.2.2  Im Task Main wurde der Precedes Überarbeitet.
+    v.5.2.3  In der Task Display wurde eine While-Schleife hinzugefügt.
+    v.5.2.4  Der Kalibrierungscode wurde so anpasst das er nun Selbstständig starten kann.
+*/
+
+#define SENSOR_LEFT  IN_1
+#define SENSOR_RIGHT IN_4
+
+#define LOW_SENSOR IN_3
+
+#define MOTOR_LEFT  OUT_A
+#define MOTOR_RIGHT OUT_B
+
+#define DODGE_SPEED 10
+#define THRESHOLD   55
+
+
+int threshold;
+int wert_light_left, wert_light_right;
+int speed_left, speed_right;
+int distance;
+int MOTOR_SPEED = 55;
+int left;
+int right;
+int umfahren;
+
+
+// In diesem Teil des Programms wird der Linke Sensor benutzt um den Threshold zu berechnen
+void kalibrieren()
+{
+ int weiss;
+ SetSensorLight(SENSOR_LEFT);
+ weiss = Sensor(SENSOR_LEFT);
+ threshold = weiss - 15;
+}
+
+task fahren()
+{
+  SetSensorLight(IN_1);
+  SetSensorLight(IN_4);
+
+  left = Sensor(SENSOR_LEFT);
+  right = Sensor(SENSOR_RIGHT);
+
+  wert_light_left  = Sensor(SENSOR_LEFT);
+  wert_light_right = Sensor(SENSOR_RIGHT);
+
+  //Bei den Threshold wurde ein Wert hinterlegt, der bei der Kalibrierung festgelegt wurde, dieser Wert liegt genau zwischen dem Schwarzen und Weißen
+  //Wert den der Ultraschallsensor erkennt. Mithilfe von If-Anweisungen wird Festgestellt, ob beide Lichtsensoren Beispielsweise Weiß erkennen,
+  // Die Logik dahinter ist ist der Wert vom Linken Ultraschallsensor größer als der Threshold und der Rechte auch, so weiß er, dass er sich auf einer
+  // Geraden Strecke ohne Außenlinien sich befindet. Das Geiche trifft für die anderen Fälle ein.
+
+  if(left > threshold && right > threshold)
+  {
+   OnFwd(MOTOR_LEFT, MOTOR_SPEED);
+   OnFwd(MOTOR_RIGHT, MOTOR_SPEED);
+   speed_left = MOTOR_SPEED;
+   speed_right = MOTOR_SPEED;
+  }
+  else if(left <= threshold && right > threshold)
+  {
+
+   OnRev(MOTOR_LEFT, DODGE_SPEED);
+   OnFwd(MOTOR_RIGHT, MOTOR_SPEED);
+   speed_left = DODGE_SPEED;
+   speed_right = MOTOR_SPEED;
+  }
+  else if(left > threshold && right <= threshold)
+  {
+   OnFwd(MOTOR_LEFT, MOTOR_SPEED);
+   OnRev(MOTOR_RIGHT, DODGE_SPEED);
+   speed_left = MOTOR_SPEED;
+   speed_right = DODGE_SPEED;
+  }
+}
+
+
+task display()
+{
+  while(true){
+     ClearScreen();
+     TextOut(0 ,LCD_LINE1, "Licht L:");
+     NumOut (60,LCD_LINE1, wert_light_left);
+     TextOut(0 ,LCD_LINE2, "Licht R:");
+     NumOut (60,LCD_LINE2, wert_light_right);
+     TextOut(0 ,LCD_LINE3, "Speed L:");
+     NumOut (60,LCD_LINE3, speed_left);
+     TextOut(0 ,LCD_LINE4, "Speed R:");
+     NumOut (60,LCD_LINE4, speed_right);
+     TextOut(0 ,LCD_LINE5, "Threshold:");
+     NumOut (60,LCD_LINE5, threshold);
+     TextOut(0 ,LCD_LINE6, "Distanz:");
+     NumOut (70,LCD_LINE6, distance);
+     Wait(100);
+   }
+}
+
+task PID_Regler()
+{
+    int x;
+    int e;
+    int e_old = 0;
+    int y;
+    int P_term, I_term, D_term;
+    int taktrate = 10;
+    float Kp = 2;
+    float Ki = 0.8;
+    float Kd = 0.1;
+    float esum = 0;
+    int Richtwert = 30;
+
+    SetSensorLowspeed(LOW_SENSOR);
+
+    while(true)
+    {
+        x = SensorUS(LOW_SENSOR);
+        distance = x;
+
+        e = x - Richtwert;
+
+        P_term = Kp * e;
+
+        esum += e * (taktrate / 1000.0);
+
+        if(esum > 30)  esum = 30;
+        if(esum < -30) esum = -30;
+
+        I_term = Ki * esum;
+
+        D_term = Kd * (e - e_old);
+        e_old = e;
+
+        y = P_term + I_term + D_term;
+
+        if(y > 60)  y = 60;
+        if(y < 0)   y = 0;
+
+        MOTOR_SPEED = y;
+
+        Wait(taktrate);
+    }
+}
+
+
+task main()
+{
+ kalibrieren();
+
+ Wait(5000);
+ ClearScreen();
+
+ Precedes(display, PID_Regler, fahren);
+ }
