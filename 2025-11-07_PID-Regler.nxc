@@ -172,5 +172,3 @@ task main()
 
  Precedes(display, PID_Regler, fahren);
  }
-
-int test = 67;
